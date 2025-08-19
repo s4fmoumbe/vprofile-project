@@ -1,27 +1,21 @@
 pipeline {
-    
-	agent any
-/*	
-	tools {
-        maven "maven3"
-    }
-*/	
+    agent any
+
     environment {
-        SNAP_REPO = 'app-snapshot'
-        NEXUS_VERSION = "nexus3"
-        NEXUS_PROTOCOL = "http"
-        NEXUS_URL = "172.31.94.48:8081"
-        NEXUS_REPOSITORY = "app-release"
-	    NEXUS_REPOGRP_ID    = "app-group"
-        NEXUS_CREDENTIAL_ID = "nexuslogin"
-        ARTVERSION = "${env.BUILD_ID}"
-        SONARSERVER = 'sonarserver'
-        SONARSCANNER = 'sonarscanner'
+        SNAP_REPO          = 'app-snapshot'
+        NEXUS_VERSION      = "nexus3"
+        NEXUS_PROTOCOL     = "http"
+        NEXUS_URL          = "172.31.94.48:8081"
+        NEXUS_REPOSITORY   = "app-release"
+        NEXUS_REPOGRP_ID   = "app-group"
+        NEXUS_CREDENTIAL_ID= "nexuslogin"
+        ARTVERSION         = "${env.BUILD_ID}"
+        SONARSERVER        = 'sonarserver'
+        SONARSCANNER       = 'sonarscanner'
     }
-	
-    stages{
-        
-        stage('BUILD'){
+
+    stages {
+        stage('BUILD') {
             steps {
                 sh 'mvn clean install -DskipTests'
             }
@@ -33,19 +27,19 @@ pipeline {
             }
         }
 
-	stage('UNIT TEST'){
+        stage('UNIT TEST') {
             steps {
                 sh 'mvn test'
             }
         }
 
-	stage('INTEGRATION TEST'){
+        stage('INTEGRATION TEST') {
             steps {
                 sh 'mvn verify -DskipUnitTests'
             }
         }
-		
-        stage ('CODE ANALYSIS WITH CHECKSTYLE'){
+
+        stage('CODE ANALYSIS WITH CHECKSTYLE') {
             steps {
                 sh 'mvn checkstyle:checkstyle'
             }
@@ -57,39 +51,46 @@ pipeline {
         }
 
         stage('CODE ANALYSIS with SONARQUBE') {
-          
-		  environment {
-             scannerHome = tool 'sonarscanner'
-          }
-
-          steps {
-            withSonarQubeEnv("${SONARSERVER}")  {
-               sh '''${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=vprofile \
-                   -Dsonar.projectName=vprofile-repo \
-                   -Dsonar.projectVersion=1.0 \
-                   -Dsonar.sources=src/ \
-                   -Dsonar.java.binaries=target/test-classes/com/visualpathit/account/controllerTest/ \
-                   -Dsonar.junit.reportsPath=target/surefire-reports/ \
-                   -Dsonar.jacoco.reportsPath=target/jacoco.exec \
-                   -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml'''
+            environment {
+                scannerHome = tool 'sonarscanner'
             }
+            steps {
+                withSonarQubeEnv("${SONARSERVER}") {
+                    sh '''${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=vprofile \
+                        -Dsonar.projectName=vprofile-repo \
+                        -Dsonar.projectVersion=1.0 \
+                        -Dsonar.sources=src/ \
+                        -Dsonar.java.binaries=target/test-classes/com/visualpathit/account/controllerTest/ \
+                        -Dsonar.junit.reportsPath=target/surefire-reports/ \
+                        -Dsonar.jacoco.reportsPath=target/jacoco.exec \
+                        -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml'''
+                }
 
-            // timeout(time: 10, unit: 'MINUTES') {
-            //    waitForQualityGate abortPipeline: true
-            // }
-          }
+                // Uncomment if you want to enforce quality gate
+                // timeout(time: 10, unit: 'MINUTES') {
+                //    waitForQualityGate abortPipeline: true
+                // }
+            }
         }
 
         stage("Publish to Nexus Repository Manager") {
             steps {
                 script {
-                    pom = readMavenPom file: "pom.xml";
-                    filesByGlob = findFiles(glob: "target/*.${pom.packaging}");
-                    echo "${filesByGlob[0].name} ${filesByGlob[0].path} ${filesByGlob[0].directory} ${filesByGlob[0].length} ${filesByGlob[0].lastModified}"
-                    artifactPath = filesByGlob[0].path;
-                    artifactExists = fileExists artifactPath;
-                    if(artifactExists) {
-                        echo "*** File: ${artifactPath}, group: ${pom.groupId}, packaging: ${pom.packaging}, version ${pom.version} ARTVERSION";
+                    // Parse pom.xml manually (no plugin needed)
+                    def pom = new XmlSlurper().parse(new File("pom.xml"))
+                    def groupId = pom.groupId.text()
+                    def artifactId = pom.artifactId.text()
+                    def version = pom.version.text()
+                    def packaging = pom.packaging.text()
+
+                    filesByGlob = findFiles(glob: "target/*.${packaging}")
+                    echo "${filesByGlob[0].name} ${filesByGlob[0].path}"
+
+                    artifactPath = filesByGlob[0].path
+                    artifactExists = fileExists artifactPath
+
+                    if (artifactExists) {
+                        echo "*** File: ${artifactPath}, group: ${groupId}, packaging: ${packaging}, version ${version} ARTVERSION ${ARTVERSION}"
                         nexusArtifactUploader(
                             nexusVersion: NEXUS_VERSION,
                             protocol: NEXUS_PROTOCOL,
@@ -99,26 +100,22 @@ pipeline {
                             repository: NEXUS_REPOSITORY,
                             credentialsId: NEXUS_CREDENTIAL_ID,
                             artifacts: [
-                                [artifactId: pom.artifactId,
-                                classifier: '',
-                                file: artifactPath,
-                                type: pom.packaging],
-                                [artifactId: pom.artifactId,
-                                classifier: '',
-                                file: "pom.xml",
-                                type: "pom"]
+                                [artifactId: artifactId,
+                                 classifier: '',
+                                 file: artifactPath,
+                                 type: packaging],
+                                [artifactId: artifactId,
+                                 classifier: '',
+                                 file: "pom.xml",
+                                 type: "pom"]
                             ]
-                        );
-                    } 
-		    else {
-                        error "*** File: ${artifactPath}, could not be found";
+                        )
+                    } else {
+                        error "*** File: ${artifactPath}, could not be found"
                     }
                 }
             }
         }
-
-
     }
-
-
 }
+
