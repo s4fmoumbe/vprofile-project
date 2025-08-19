@@ -2,16 +2,16 @@ pipeline {
     agent any
 
     environment {
-        SNAP_REPO          = 'app-snapshot'
-        NEXUS_VERSION      = "nexus3"
-        NEXUS_PROTOCOL     = "http"
-        NEXUS_URL          = "172.31.94.48:8081"
-        NEXUS_REPOSITORY   = "app-release"
-        NEXUS_REPOGRP_ID   = "app-group"
-        NEXUS_CREDENTIAL_ID= "nexuslogin"
-        ARTVERSION         = "${env.BUILD_ID}"
-        SONARSERVER        = 'sonarserver'
-        SONARSCANNER       = 'sonarscanner'
+        SNAP_REPO           = 'app-snapshot'
+        NEXUS_VERSION       = "nexus3"
+        NEXUS_PROTOCOL      = "http"
+        NEXUS_URL           = "172.31.94.48:8081"
+        NEXUS_REPOSITORY    = "app-release"
+        NEXUS_REPOGRP_ID    = "app-group"
+        NEXUS_CREDENTIAL_ID = "nexuslogin"
+        ARTVERSION          = "${env.BUILD_ID}"
+        SONARSERVER         = 'sonarserver'
+        SONARSCANNER        = 'sonarscanner'
     }
 
     stages {
@@ -76,21 +76,20 @@ pipeline {
         stage("Publish to Nexus Repository Manager") {
             steps {
                 script {
-                    // Parse pom.xml manually (no plugin needed)
-                    def pom = new XmlSlurper().parse(new File("pom.xml"))
-                    def groupId = pom.groupId.text()
-                    def artifactId = pom.artifactId.text()
-                    def version = pom.version.text()
-                    def packaging = pom.packaging.text()
+                    // Extract project details from pom.xml using Maven help:evaluate
+                    def groupId    = sh(script: "mvn help:evaluate -Dexpression=project.groupId -q -DforceStdout", returnStdout: true).trim()
+                    def artifactId = sh(script: "mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout", returnStdout: true).trim()
+                    def version    = sh(script: "mvn help:evaluate -Dexpression=project.version -q -DforceStdout", returnStdout: true).trim()
+                    def packaging  = sh(script: "mvn help:evaluate -Dexpression=project.packaging -q -DforceStdout", returnStdout: true).trim()
 
+                    echo "Project Info → ${groupId}:${artifactId}:${version} (${packaging})"
+
+                    // Find artifact
                     filesByGlob = findFiles(glob: "target/*.${packaging}")
-                    echo "${filesByGlob[0].name} ${filesByGlob[0].path}"
-
                     artifactPath = filesByGlob[0].path
-                    artifactExists = fileExists artifactPath
 
-                    if (artifactExists) {
-                        echo "*** File: ${artifactPath}, group: ${groupId}, packaging: ${packaging}, version ${version} ARTVERSION ${ARTVERSION}"
+                    if (fileExists(artifactPath)) {
+                        echo "*** File: ${artifactPath}, group: ${groupId}, packaging: ${packaging}, version ${version}, ARTVERSION ${ARTVERSION}"
                         nexusArtifactUploader(
                             nexusVersion: NEXUS_VERSION,
                             protocol: NEXUS_PROTOCOL,
